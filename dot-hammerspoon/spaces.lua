@@ -68,27 +68,93 @@ end
 
 cache.moveWindowOneSpace = function(direction)
   local currentWindow = hs.window.focusedWindow()
-
-  if currentWindow == nil then
-    return
-  end
+  if not currentWindow then return end
 
   local currentScreen = currentWindow:screen()
   local mouseScreen = hs.mouse.getCurrentScreen()
   local screenSpaces = hs.spaces.spacesForScreen(currentScreen)
 
-  if #screenSpaces > 1 then
-    local activeSpace = hs.spaces.activeSpaceOnScreen(currentScreen)
-    local index = utils.findIndex(screenSpaces, activeSpace)
-    local nextIndex = utils.getNextIndex(index, #screenSpaces, direction)
+  if #screenSpaces <= 1 then return end
 
-    if currentScreen ~= mouseScreen then
-      cache.moveMouseToCenterScreen(currentScreen)
-    end
+  local activeSpace = hs.spaces.activeSpaceOnScreen(currentScreen)
+  local index = utils.findIndex(screenSpaces, activeSpace)
+  local nextIndex = utils.getNextIndex(index, #screenSpaces, direction)
 
-    cache.moveToSpace(index, nextIndex)
-    hs.spaces.moveWindowToSpace(currentWindow, screenSpaces[nextIndex])
+  -- Calculate steps and actual key direction, handling wrap-around
+  local steps, actualKey
+  if direction == 'right' and index == #screenSpaces then
+    steps = #screenSpaces - 1
+    actualKey = 'left'
+  elseif direction == 'left' and index == 1 then
+    steps = #screenSpaces - 1
+    actualKey = 'right'
+  else
+    steps = 1
+    actualKey = utils.ternary(direction == 'left', 'left', 'right')
   end
+
+  if steps == 0 then return end
+
+  cache.setAnimating()
+
+  if currentScreen ~= mouseScreen then
+    cache.moveMouseToCenterScreen(currentScreen)
+  end
+
+  -- Ensure window is frontmost before grabbing
+  currentWindow:unminimize()
+  currentWindow:raise()
+  currentWindow:focus()
+
+  local frame = currentWindow:frame()
+  local originalFrame = { x = frame.x, y = frame.y, w = frame.w, h = frame.h }
+  local clickPos = { x = frame.x + 50, y = frame.y + 10 }
+  local centerPos = { x = frame.x + frame.w / 2, y = frame.y + frame.h / 2 }
+
+  local function releaseAndRestore()
+    local finalPos = hs.mouse.absolutePosition()
+    hs.eventtap.event.newMouseEvent(hs.eventtap.event.types.leftMouseUp, finalPos):post()
+    hs.timer.doAfter(0.05, function()
+      if currentWindow:isVisible() then
+        currentWindow:setFrame(originalFrame)
+      end
+      currentWindow:raise()
+      currentWindow:focus()
+      hs.mouse.absolutePosition(centerPos)
+    end)
+  end
+
+  local function pressKeyStep(remaining)
+    hs.eventtap.event.newKeyEvent('ctrl', true):post()
+    hs.timer.doAfter(0.02, function()
+      hs.eventtap.event.newKeyEvent(actualKey, true):post()
+      hs.timer.doAfter(0.02, function()
+        hs.eventtap.event.newKeyEvent(actualKey, false):post()
+        hs.eventtap.event.newKeyEvent('ctrl', false):post()
+        if remaining > 1 then
+          hs.timer.doAfter(0.4, function() pressKeyStep(remaining - 1) end)
+        else
+          hs.timer.doAfter(0.6, releaseAndRestore)
+        end
+      end)
+    end)
+  end
+
+  -- Step 1: move mouse to title bar
+  hs.mouse.absolutePosition(clickPos)
+  hs.timer.doAfter(0.05, function()
+    -- Step 2: mouse down
+    hs.eventtap.event.newMouseEvent(hs.eventtap.event.types.leftMouseDown, clickPos):post()
+    hs.timer.doAfter(0.1, function()
+      -- Step 3: tiny drag to register grab gesture
+      local dragPos = { x = clickPos.x + 1, y = clickPos.y }
+      hs.eventtap.event.newMouseEvent(hs.eventtap.event.types.leftMouseDragged, dragPos)
+        :setProperty(hs.eventtap.event.properties.mouseEventDeltaX, 1)
+        :post()
+      -- Step 4: fire key steps
+      hs.timer.doAfter(0.05, function() pressKeyStep(steps) end)
+    end)
+  end)
 end
 
 cache.moveMouseToCenterScreen = function(screen)
@@ -216,14 +282,15 @@ module.moveMouseToPreviousScreen = function()
   cache.moveMouseOneScreen('left')
 end
 
+
 -- URL Events
-hs.urlevent.bind('moveLeftSpace', module.moveLeftSpace)
-hs.urlevent.bind('moveRightSpace', module.moveRightSpace)
-hs.urlevent.bind('insertSpace', module.insertSpace)
-hs.urlevent.bind('removeSpace', module.removeSpace)
-hs.urlevent.bind('moveWindowToLeftSpace', module.moveWindowToLeftSpace)
-hs.urlevent.bind('moveWindowToRightSpace', module.moveWindowToRightSpace)
-hs.urlevent.bind('moveMouseToPreviousScreen', module.moveMouseToPreviousScreen)
-hs.urlevent.bind('moveMouseToNextScreen', module.moveMouseToNextScreen)
+hs.urlevent.bind('moveleftspace', module.moveLeftSpace)
+hs.urlevent.bind('moverightspace', module.moveRightSpace)
+hs.urlevent.bind('insertspace', module.insertSpace)
+hs.urlevent.bind('removespace', module.removeSpace)
+hs.urlevent.bind('movewindowtoleftspace', module.moveWindowToLeftSpace)
+hs.urlevent.bind('movewindowtorightspace', module.moveWindowToRightSpace)
+hs.urlevent.bind('movemousetopreviousscreen', module.moveMouseToPreviousScreen)
+hs.urlevent.bind('movemousetonextscreen', module.moveMouseToNextScreen)
 
 return module

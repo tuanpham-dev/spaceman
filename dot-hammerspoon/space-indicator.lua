@@ -1,4 +1,5 @@
 local utils = require('utils')
+local spaces = require('spaces')
 
 local cache = {
   alertIcon = '⬜',
@@ -45,9 +46,11 @@ cache.render = function()
   cache.menuBar:setTitle(menuBarContent)
 end
 
-local spaceWatcher = hs.spaces.watcher.new(cache.render)
+local spaceWatcher = hs.spaces.watcher.new(function()
+  module.render()
+end)
 local screenWatcher = hs.screen.watcher.newWithActiveScreen(function()
-  cache.render()
+  module.render()
   cache.previousScreen = hs.screen.mainScreen()
 end)
 
@@ -57,7 +60,10 @@ module = {
   enableMenuBarIcon = true,
   enableAlert = true,
   alertOnScreenChange = false,
-  render = cache.render
+  render = function()
+    cache.render()
+    module.initMenu()
+  end
 }
 
 module.init = function()
@@ -74,55 +80,106 @@ module.init = function()
 end
 
 module.initMenu = function()
-  module.setMenu({
-    {
-      title = 'Options',
-      menu = {
-        {
-          title = 'Enable Menubar Icon',
-          checked = module.enableMenuBarIcon,
-          tooltip = utils.ternary(module.enableMenuBarIcon, 'Hide  Menubar Icon. Press ' .. cache.hotkeyToString(module.hotkey) .. ' to show the icon again.', nil),
-          fn = function()
-            utils.saveSetting(module, 'enableMenuBarIcon', not module.enableMenuBarIcon)
-            module.initMenu()
+  local currentScreen = hs.mouse.getCurrentScreen()
+  local screenSpaces = hs.spaces.spacesForScreen(currentScreen)
+  local activeSpace = hs.spaces.activeSpaceOnScreen(currentScreen)
 
-            if module.enableMenuBarIcon then
-              module.showMenubar()
-            else
-              module.hideMenubar()
-            end
-          end
-        },
-        {
-          title = 'Enable Alert',
-          checked = module.enableAlert,
-          fn = function()
-            utils.saveSetting(module, 'enableAlert', not module.enableAlert)
-            module.initMenu()
-          end
-        },
-        {
-          title = 'Alert On Active Screen Change',
-          checked = module.alertOnScreenChange,
-          disabled = not module.enableAlert,
-          fn = function()
-            utils.saveSetting(module, 'alertOnScreenChange', not module.alertOnScreenChange)
-            module.initMenu()
-          end
-        }
-      }
-    },
-    {
-      title = '-'
-    },
-    {
-      title = 'Quit',
-      tooltip = 'Stop Space Indicator. Press ' .. cache.hotkeyToString(module.hotkey) .. ' to start again.',
+  local menuItems = {}
+
+  local activeIndex = 1
+  for i, spaceId in ipairs(screenSpaces) do
+    if spaceId == activeSpace then activeIndex = i end
+  end
+
+  for i, spaceId in ipairs(screenSpaces) do
+    local targetIndex = i
+    table.insert(menuItems, {
+      title = 'Space ' .. i,
+      checked = spaceId == activeSpace,
       fn = function()
-        module:stop()
+        if targetIndex == activeIndex then return end
+        local direction = targetIndex < activeIndex and 'left' or 'right'
+        local steps = math.abs(targetIndex - activeIndex)
+        hs.timer.doAfter(0.1, function()
+          hs.eventtap.event.newKeyEvent(hs.keycodes.map.ctrl, true):post()
+          for _ = 1, steps do
+            hs.eventtap.event.newKeyEvent(direction, true):post()
+            hs.eventtap.event.newKeyEvent(direction, false):post()
+          end
+          hs.eventtap.event.newKeyEvent(hs.keycodes.map.ctrl, false):post()
+        end)
       end
+    })
+  end
+
+  table.insert(menuItems, { title = '-' })
+
+  table.insert(menuItems, {
+    title = 'Add Space',
+    fn = function()
+      spaces.insertSpace()
+    end
+  })
+
+  table.insert(menuItems, {
+    title = 'Remove Space',
+    disabled = #screenSpaces <= 1,
+    fn = function()
+      spaces.removeSpace()
+    end
+  })
+
+  table.insert(menuItems, { title = '-' })
+
+  table.insert(menuItems, {
+    title = 'Options',
+    menu = {
+      {
+        title = 'Enable Menubar Icon',
+        checked = module.enableMenuBarIcon,
+        tooltip = utils.ternary(module.enableMenuBarIcon, 'Hide  Menubar Icon. Press ' .. cache.hotkeyToString(module.hotkey) .. ' to show the icon again.', nil),
+        fn = function()
+          utils.saveSetting(module, 'enableMenuBarIcon', not module.enableMenuBarIcon)
+          module.initMenu()
+
+          if module.enableMenuBarIcon then
+            module.showMenubar()
+          else
+            module.hideMenubar()
+          end
+        end
+      },
+      {
+        title = 'Enable Alert',
+        checked = module.enableAlert,
+        fn = function()
+          utils.saveSetting(module, 'enableAlert', not module.enableAlert)
+          module.initMenu()
+        end
+      },
+      {
+        title = 'Alert On Active Screen Change',
+        checked = module.alertOnScreenChange,
+        disabled = not module.enableAlert,
+        fn = function()
+          utils.saveSetting(module, 'alertOnScreenChange', not module.alertOnScreenChange)
+          module.initMenu()
+        end
+      }
     }
   })
+
+  table.insert(menuItems, { title = '-' })
+
+  table.insert(menuItems, {
+    title = 'Quit',
+    tooltip = 'Stop Space Indicator. Press ' .. cache.hotkeyToString(module.hotkey) .. ' to start again.',
+    fn = function()
+      module:stop()
+    end
+  })
+
+  module.setMenu(menuItems)
 end
 
 module.setClickCallback = function(modifiers)

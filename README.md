@@ -6,6 +6,7 @@ This [Hammerspoon](http://www.hammerspoon.org/) config enhances MacOS mission co
 * Move focused window to a space.
 * Move mouse to a monitor.
 * Space indicator in menubar or OSD.
+* Menubar menu to jump to a space, add or remove a space.
 
 ## Prerequisites
 
